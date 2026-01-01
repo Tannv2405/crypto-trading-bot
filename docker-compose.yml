@@ -1,0 +1,139 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: trading_bot_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: trading_bot
+      POSTGRES_USER: trading_user
+      POSTGRES_PASSWORD: trading_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    ports:
+      - "5433:5432"
+    networks:
+      - trading_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trading_user -d trading_bot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Trading Bot Application
+  trading_bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: trading_bot_app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database Configuration
+      POSTGRES_URL: postgresql://trading_user:trading_password@postgres:5432/trading_bot
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: trading_bot
+      POSTGRES_USER: trading_user
+      POSTGRES_PASSWORD: trading_password
+      
+      # OKX API Configuration
+      OKX_API_KEY: ${OKX_API_KEY:-aed6abd-74c4-44b1-abb3-e0786bd8d326}
+      OKX_SECRET_KEY: ${OKX_SECRET_KEY:-55192F0D88D3FF934F26E00ACAC846C5}
+      OKX_PASSPHRASE: ${OKX_PASSPHRASE:-}
+      OKX_IS_DEMO: ${OKX_IS_DEMO:-true}
+      
+      # Telegram Configuration
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-8566112159:AAHMpwGX-ePsH9SpzaQ1Q9tXzkiRYAkyFq4}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-5386085849}
+      
+      # Trading Configuration
+      TRADING_PAIR: ${TRADING_PAIR:-BTC/USDT}
+      INITIAL_BALANCE: ${INITIAL_BALANCE:-10000}
+      TRADE_SIZE_USD: ${TRADE_SIZE_USD:-100}
+      PAPER_TRADING: ${PAPER_TRADING:-true}
+      CHECK_INTERVAL: ${CHECK_INTERVAL:-60}
+      
+      # Strategy Parameters
+      SHORT_SMA_PERIOD: ${SHORT_SMA_PERIOD:-10}
+      LONG_SMA_PERIOD: ${LONG_SMA_PERIOD:-30}
+      RSI_PERIOD: ${RSI_PERIOD:-14}
+      RSI_OVERBOUGHT: ${RSI_OVERBOUGHT:-70}
+      RSI_OVERSOLD: ${RSI_OVERSOLD:-30}
+      STOP_LOSS_PERCENT: ${STOP_LOSS_PERCENT:-5.0}
+      TAKE_PROFIT_PERCENT: ${TAKE_PROFIT_PERCENT:-10.0}
+      
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    networks:
+      - trading_network
+    healthcheck:
+      test: ["CMD", "python", "-c", "from config.db_config import test_connection; exit(0 if test_connection() else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Configuration Management CLI (optional service)
+  config_cli:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: trading_bot_config
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_URL: postgresql://trading_user:trading_password@postgres:5432/trading_bot
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: trading_bot
+      POSTGRES_USER: trading_user
+      POSTGRES_PASSWORD: trading_password
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    networks:
+      - trading_network
+    profiles:
+      - tools
+    command: ["python", "config_cli.py", "list"]
+
+  # Database Administration (optional)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: trading_bot_pgadmin
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@trading-bot.local
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    ports:
+      - "8080:80"
+    networks:
+      - trading_network
+    profiles:
+      - admin
+
+volumes:
+  postgres_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  trading_network:
+    driver: bridge

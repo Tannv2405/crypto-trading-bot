@@ -1,0 +1,29 @@
+# Docker Compose override file for development
+# This file is automatically loaded by docker-compose and can be used
+# to override settings for development environment
+
+version: '3.8'
+
+services:
+  trading_bot:
+    # Enable development mode
+    environment:
+      LOG_LEVEL: DEBUG
+      PAPER_TRADING: "true"
+    # Mount source code for development (hot reload)
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+      - ./data:/app/data
+    # Override command for development
+    # command: ["python", "-u", "main.py"]
+    
+  postgres:
+    # Expose postgres port for development access
+    ports:
+      - "5432:5432"
+    # Enable logging for development
+    command: ["postgres", "-c", "log_statement=all", "-c", "log_destination=stderr"]
+
+# Uncomment to enable pgAdmin for development
+# profiles: []  # This removes the profile restriction for pgadmin

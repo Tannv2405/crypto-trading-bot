@@ -1,0 +1,84 @@
+# Docker Compose configuration for production
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+
+version: '3.8'
+
+services:
+  postgres:
+    # Production database settings
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-trading_bot}
+      POSTGRES_USER: ${POSTGRES_USER:-trading_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}  # Must be set in production
+    # Use named volume for data persistence
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    # Don't expose port in production (internal only)
+    ports: []
+    # Production postgres configuration
+    command: [
+      "postgres",
+      "-c", "shared_preload_libraries=pg_stat_statements",
+      "-c", "pg_stat_statements.track=all",
+      "-c", "max_connections=200",
+      "-c", "shared_buffers=256MB",
+      "-c", "effective_cache_size=1GB",
+      "-c", "work_mem=4MB",
+      "-c", "maintenance_work_mem=64MB",
+      "-c", "random_page_cost=1.1",
+      "-c", "temp_file_limit=2GB",
+      "-c", "log_min_duration_statement=1000",
+      "-c", "log_connections=on",
+      "-c", "log_disconnections=on",
+      "-c", "log_lock_waits=on"
+    ]
+
+  trading_bot:
+    # Production environment settings
+    environment:
+      LOG_LEVEL: INFO
+      PAPER_TRADING: ${PAPER_TRADING:-false}  # Default to live trading in prod
+      
+      # Security: Use secrets for sensitive data
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      OKX_API_KEY: ${OKX_API_KEY}
+      OKX_SECRET_KEY: ${OKX_SECRET_KEY}
+      OKX_PASSPHRASE: ${OKX_PASSPHRASE}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+    
+    # Production resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    
+    # Production restart policy
+    restart: always
+    
+    # Production logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # Production volumes (read-only code)
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+
+  # Remove pgadmin from production
+  pgadmin:
+    profiles:
+      - admin
+      - never  # Effectively disable in production
+
+volumes:
+  postgres_prod_data:
+    driver: local
