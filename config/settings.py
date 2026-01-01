@@ -39,14 +39,14 @@ class Settings:
     POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "password")
     
     # OKX API Configuration
-    OKX_API_KEY = os.getenv("OKX_API_KEY", "aed6abd-74c4-44b1-abb3-e0786bd8d326")
-    OKX_SECRET_KEY = os.getenv("OKX_SECRET_KEY", "55192F0D88D3FF934F26E00ACAC846C5")
+    OKX_API_KEY = os.getenv("OKX_API_KEY", "")
+    OKX_SECRET_KEY = os.getenv("OKX_SECRET_KEY", "")
     OKX_PASSPHRASE = os.getenv("OKX_PASSPHRASE", "")
     OKX_IS_DEMO = os.getenv("OKX_IS_DEMO", "true").lower() == "true"
     
     # Telegram Configuration
-    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8566112159:AAHMpwGX-ePsH9SpzaQ1Q9tXzkiRYAkyFq4")
-    TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "5386085849")
+    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
     
     # Logging Configuration
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
