@@ -20,12 +20,17 @@ from services.multi_pair_data_fetcher import multi_pair_data_fetcher
 from services.order_executor import order_executor
 from services.risk_manager import risk_manager
 from services.telegram_notifier import telegram_notifier
+from services.telegram_channel_notifier import initialize_channel_notifier, get_channel_notifier
 from strategies.moving_average import MovingAverageStrategy
 from strategies.rsi_strategy import RSIStrategy
 from db.db_utils import db_manager
 
 # Setup logging
 logger = setup_logger('trading_bot_main')
+
+# Channel configuration for trading signals
+CHANNEL_BOT_TOKEN = "8565730157:AAGiuu1Aip1qRsTSvWFeFlUaZZ2MIjvgvQI"
+CHANNEL_ID = "-1001234567890"  # Replace with your actual channel chat ID (starts with -100 for channels)
 
 class TradingBot:
     """Main trading bot orchestrator with multi-crypto support."""
@@ -37,6 +42,9 @@ class TradingBot:
         self.market_data = {}
         self.iteration_count = 0
         self.start_time = None
+        
+        # Initialize channel notifier for trading signals
+        self.channel_notifier = initialize_channel_notifier(CHANNEL_BOT_TOKEN, CHANNEL_ID)
         
         # Load multi-crypto configuration
         self.config = self._load_multi_crypto_config()
@@ -159,6 +167,15 @@ class TradingBot:
             # Test Telegram connection
             if telegram_notifier.enabled or telegram_notifier.use_bot_fallback:
                 telegram_notifier.test_connection()
+            
+            # Test channel notifier connection
+            if self.channel_notifier and self.channel_notifier.enabled:
+                try:
+                    logger.info("Testing Telegram channel connection...")
+                    self.channel_notifier.test_connection()
+                    logger.info("Channel notifier test completed")
+                except Exception as e:
+                    logger.error(f"Channel notifier test failed: {e}")
             
             # Fetch initial market data for all pairs
             await self.fetch_initial_data()
@@ -308,6 +325,27 @@ class TradingBot:
                             'indicators': signal['indicators']
                         })
                     
+                    # Send signal to channel if it's a valid trading signal (BUY/SELL)
+                    if signal['action'] in ['BUY', 'SELL'] and self.channel_notifier:
+                        try:
+                            # Determine confidence level based on signal strength
+                            confidence = self._calculate_signal_confidence(signal, strategy_name)
+                            
+                            self.channel_notifier.send_trading_signal({
+                                'signal': signal['action'],
+                                'symbol': pair_symbol,
+                                'price': self.current_prices[pair_symbol],
+                                'strategy': strategy_name,
+                                'indicators': signal.get('indicators', {}),
+                                'confidence': confidence,
+                                'reason': signal.get('reason', 'Strategy conditions met')
+                            })
+                            
+                            logger.info(f"Sent {signal['action']} signal for {pair_symbol} to channel")
+                            
+                        except Exception as e:
+                            logger.error(f"Error sending signal to channel for {pair_symbol}: {e}")
+                    
                 except Exception as e:
                     logger.error(f"Error processing {strategy_name} strategy for {pair_symbol}: {e}")
                     
@@ -449,6 +487,22 @@ class TradingBot:
                     'balance_crypto': order_executor.balance_crypto
                 })
                 
+                # Send trade execution to channel
+                if self.channel_notifier:
+                    try:
+                        self.channel_notifier.send_trade_execution({
+                            'order_type': 'BUY',
+                            'symbol': pair_symbol,
+                            'price': current_price,
+                            'amount': position_size,
+                            'total_value': current_price * position_size,
+                            'strategy': 'Multi-Crypto Combined',
+                            'is_paper_trade': order_executor._get_paper_trading_setting()
+                        })
+                        logger.info(f"Sent BUY execution notification for {pair_symbol} to channel")
+                    except Exception as e:
+                        logger.error(f"Error sending trade execution to channel: {e}")
+                
                 logger.info(f"Buy order executed for {pair_symbol}: {position_size:.6f} at ${current_price:.2f}")
             else:
                 # Log failed order
@@ -542,6 +596,22 @@ class TradingBot:
                     'balance_usd': order_executor.balance_usd,
                     'balance_crypto': order_executor.balance_crypto
                 })
+                
+                # Send trade execution to channel
+                if self.channel_notifier:
+                    try:
+                        self.channel_notifier.send_trade_execution({
+                            'order_type': 'SELL',
+                            'symbol': pair_symbol,
+                            'price': current_price,
+                            'amount': position_size,
+                            'total_value': current_price * position_size,
+                            'strategy': 'Multi-Crypto Combined',
+                            'is_paper_trade': order_executor._get_paper_trading_setting()
+                        })
+                        logger.info(f"Sent SELL execution notification for {pair_symbol} to channel")
+                    except Exception as e:
+                        logger.error(f"Error sending trade execution to channel: {e}")
                 
                 logger.info(f"Sell order executed for {pair_symbol}: {position_size:.6f} at ${current_price:.2f}")
             else:
@@ -659,6 +729,70 @@ class TradingBot:
             
         except Exception as e:
             logger.error(f"Error sending daily summary: {e}")
+    
+    def _calculate_signal_confidence(self, signal: Dict[str, Any], strategy_name: str) -> str:
+        """
+        Calculate confidence level for a trading signal.
+        
+        Args:
+            signal: Signal data from strategy
+            strategy_name: Name of the strategy
+            
+        Returns:
+            Confidence level as string (High, Medium, Low)
+        """
+        try:
+            indicators = signal.get('indicators', {})
+            action = signal.get('action', 'HOLD')
+            
+            if action == 'HOLD':
+                return 'Low'
+            
+            confidence_score = 0
+            
+            # SMA strategy confidence
+            if strategy_name == 'sma':
+                short_sma = indicators.get('short_sma')
+                long_sma = indicators.get('long_sma')
+                
+                if short_sma and long_sma:
+                    # Calculate percentage difference between SMAs
+                    sma_diff_pct = abs((short_sma - long_sma) / long_sma) * 100
+                    
+                    if sma_diff_pct > 2.0:  # Strong divergence
+                        confidence_score += 0.7
+                    elif sma_diff_pct > 1.0:  # Moderate divergence
+                        confidence_score += 0.5
+                    else:  # Weak divergence
+                        confidence_score += 0.3
+            
+            # RSI strategy confidence
+            elif strategy_name == 'rsi':
+                rsi = indicators.get('rsi')
+                
+                if rsi:
+                    if action == 'BUY' and rsi < 25:  # Very oversold
+                        confidence_score += 0.8
+                    elif action == 'BUY' and rsi < 35:  # Oversold
+                        confidence_score += 0.6
+                    elif action == 'SELL' and rsi > 75:  # Very overbought
+                        confidence_score += 0.8
+                    elif action == 'SELL' and rsi > 65:  # Overbought
+                        confidence_score += 0.6
+                    else:
+                        confidence_score += 0.4
+            
+            # Determine confidence level
+            if confidence_score >= 0.7:
+                return 'High'
+            elif confidence_score >= 0.5:
+                return 'Medium'
+            else:
+                return 'Low'
+                
+        except Exception as e:
+            logger.error(f"Error calculating signal confidence: {e}")
+            return 'Medium'  # Default to medium confidence
     
     async def run(self):
         """Main trading loop."""

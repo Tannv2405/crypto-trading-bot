@@ -45,6 +45,7 @@ venv.bak/
 
 # Logs
 *.log
+*.log.*
 logs/
 trading_bot.log
 trading_bot_errors.log
